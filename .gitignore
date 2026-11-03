@@ -1,0 +1,17 @@
+# Build products and local IDE files
+.build/
+.swiftpm/
+*.app/
+*.dSYM/
+*.xcuserstate
+.DS_Store
+
+# Credential exports and local configuration
+*.csv
+*.tsv
+*.1pux
+*.1pif
+.env
+.env.*
+*.log
+Apple整理チェックリスト*.txt
