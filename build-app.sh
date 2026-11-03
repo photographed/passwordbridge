@@ -17,7 +17,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.passwordbridge.app</string>
 <key>CFBundleName</key><string>Password Bridge</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1.5</string>
+<key>CFBundleShortVersionString</key><string>0.2.0</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>

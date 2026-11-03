@@ -105,19 +105,7 @@ import BridgeCore
         }
     }
     func migrate() {
-        let items = selected; guard live && !demo && !items.isEmpty else { return }
-        let c = client; busy = true; selection = []
-        Task {
-            var count = 0
-            for e in items {
-                status = "\(count + 1)/\(items.count)件目を登録・照合中…"
-                do {
-                    _ = try await Task.detached { try c.createAndVerify(e) }.value
-                    verified.insert(e.id); target.append(e); count += 1
-                } catch { status = "\(count)件の照合完了後に停止。" + error.localizedDescription; busy = false; return }
-            }
-            status = "\(count)件を登録し、読み直して照合しました。ログイン・パスキーは別途確認してください。"; busy = false
-        }
+        status = "この版は読み取り専用です。移行操作は無効です。"
     }
     func exportChecklist() {
         let panel = NSSavePanel(); panel.nameFieldStringValue = "Apple整理チェックリスト.txt"
@@ -130,7 +118,12 @@ import BridgeCore
 }
 @main struct PasswordBridgeApp: App {
     @StateObject private var model = Model()
-    var body: some Scene { WindowGroup { MainView(m: model).frame(minWidth: 1060, minHeight: 700) } }
+    var body: some Scene { WindowGroup {
+        TabView {
+            CleanupView().tabItem { Label("Security Cleanup", systemImage: "shield.lefthalf.filled") }
+            MainView(m: model).tabItem { Label("Apple CSV比較", systemImage: "key.horizontal") }
+        }.frame(minWidth: 1100, minHeight: 780)
+    } }
 }
 struct MainView: View {
     @ObservedObject var m: Model
@@ -148,7 +141,7 @@ struct MainView: View {
                 Button("① Apple CSVを開く") { m.loadCSV(appleSide: true) }.disabled(m.busy)
                 Button("比較用CSVを開く") { m.loadCSV(appleSide: false) }.disabled(m.busy)
                 Spacer()
-                Text("秘密はメモリ内で比較 / Apple側の自動削除なし").font(.caption).foregroundStyle(.secondary)
+                Text("この版は読み取り専用 / 移行・削除は無効").font(.caption).foregroundStyle(.secondary)
             }
             GroupBox("② 1Passwordへ接続（指定した1保管庫のみ比較）") {
                 HStack {
@@ -195,7 +188,7 @@ struct MainView: View {
             }
             HStack {
                 Button("このページの移行候補を選択") { m.selection.formUnion(m.visible.filter { $0.verdict == .new }.map(\.id)) }.disabled(!m.live || m.demo)
-                Button("③ 選択した\(m.selected.count)件を移行") { confirming = true }.buttonStyle(.borderedProminent).disabled(m.selected.isEmpty || !m.live || m.demo)
+                Button("③ 選択した\(m.selected.count)件を移行") { confirming = true }.buttonStyle(.borderedProminent).disabled(true)
                 Button("選択を解除") { m.selection = [] }
                 Spacer()
                 Button("④ 整理チェックリストを保存") { m.exportChecklist() }.disabled(!m.loaded || m.demo)

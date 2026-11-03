@@ -77,6 +77,10 @@ public struct OPClient: Sendable {
         guard executable.hasPrefix("/"), !account.isEmpty, !vault.isEmpty else { throw BridgeError.message("CLIの絶対パス、アカウントID、保管庫IDを指定してください。") }
         let p = Process(); p.executableURL = URL(fileURLWithPath: executable)
         p.arguments = args + ["--account", account, "--format", "json"]
+        var environment = ProcessInfo.processInfo.environment
+        environment["OP_DEBUG"] = "false"
+        environment["OP_CACHE"] = "false"
+        p.environment = environment
         let output = Pipe(), errors = Pipe(), stdin = Pipe()
         p.standardOutput = output; p.standardError = errors; p.standardInput = stdin
         // Drain stderr concurrently, never expose CLI output in UI/logs.
@@ -111,8 +115,8 @@ public struct OPClient: Sendable {
             Entry(id: (item["id"] as? String ?? UUID().uuidString) + url, title: item["title"] as? String ?? "", url: url, username: field("username"), password: field("password"), otp: otp, notes: field("notesPlain"))
         }
     }
-    private func listIDs(control: ReadControl?) throws -> [String] {
-        let data = try run(["item", "list", "--vault", vault], control: control)
+    private func listIDs(control: ReadControl?, loginsOnly: Bool = false) throws -> [String] {
+        let data = try run(["item", "list", "--vault", vault] + (loginsOnly ? ["--categories", "Login"] : []), control: control)
         let items = try CLIJSON.items(data)
         let ids = try items.map { item in
             guard let id = item["id"] as? String, !id.isEmpty else { throw BridgeError.message("項目IDがありません。比較を中止しました。") }
@@ -121,7 +125,7 @@ public struct OPClient: Sendable {
         guard Set(ids).count == ids.count else { throw BridgeError.message("一覧に重複IDがあります。再取得してください。") }
         return ids
     }
-    private func fetch(_ ids: [String], control: ReadControl?) throws -> [Entry] {
+    private func fetchItems(_ ids: [String], control: ReadControl?) throws -> [[String: Any]] {
         try control?.check()
         // Official CLI stdin input accepts an array of objects containing item IDs.
         let input = try JSONSerialization.data(withJSONObject: ids.map { ["id": $0] })
@@ -131,7 +135,47 @@ public struct OPClient: Sendable {
         guard returnedIDs.count == ids.count, Set(returnedIDs) == Set(ids) else {
             throw BridgeError.message("取得結果に欠落または重複があります。部分的な結果では比較しません。再取得してください。")
         }
-        return items.flatMap { entries($0) }
+        return items
+    }
+    private func fetch(_ ids: [String], control: ReadControl?) throws -> [Entry] {
+        try fetchItems(ids, control: control).flatMap { entries($0) }
+    }
+    // This path issues only item list/get; it never calls any migration operation.
+    public func readCleanupLogins(control: ReadControl, progress: @escaping @Sendable (ReadProgress) async -> Void) async throws -> [CleanupLogin] {
+        try control.check(); await progress(.listing)
+        let ids = try await Task.detached { try listIDs(control: control, loginsOnly: true) }.value
+        await progress(.fetching(completed: 0, total: ids.count))
+        let batches = stride(from: 0, to: ids.count, by: 50).map { Array(ids[$0..<min($0 + 50, ids.count)]) }
+        return try await withThrowingTaskGroup(of: (Int, [CleanupLogin], Int).self) { group in
+            var next = 0, completed = 0
+            var results = [Int: [CleanupLogin]]()
+            func enqueue(_ index: Int) {
+                let batch = batches[index]
+                group.addTask {
+                    do {
+                        let values = try await Task.detached { try cleanupBatch(batch, control: control) }.value
+                        return (index, values, batch.count)
+                    } catch { control.fail(error); try control.check(); throw error }
+                }
+            }
+            while next < min(3, batches.count) { enqueue(next); next += 1 }
+            while let (index, values, count) = try await group.next() {
+                try control.check(); results[index] = values; completed += count
+                await progress(.fetching(completed: completed, total: ids.count))
+                if next < batches.count { enqueue(next); next += 1 }
+            }
+            try control.check(); return batches.indices.flatMap { results[$0] ?? [] }
+        }
+    }
+    private func cleanupBatch(_ batch: [String], control: ReadControl) throws -> [CleanupLogin] {
+        try fetchItems(batch, control: control).map { item in
+            guard item["category"] as? String == "LOGIN", let id = item["id"] as? String else {
+                throw BridgeError.message("ログイン以外の項目または不正なIDが返されました。取得結果を破棄します。")
+            }
+            let fields = item["fields"] as? [[String: Any]] ?? []
+            func value(_ field: String) -> String { fields.first { $0["id"] as? String == field }?["value"] as? String ?? "" }
+            return CleanupLogin(accountID: account, vaultID: vault, itemID: id, title: item["title"] as? String ?? "", username: value("username"), urls: (item["urls"] as? [[String: Any]] ?? []).compactMap { $0["href"] as? String }, password: value("password"))
+        }
     }
     public func read() throws -> [Entry] {
         let ids = try listIDs(control: nil)

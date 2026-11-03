@@ -1,6 +1,6 @@
 import Foundation
 import BridgeCore
-func XCTAssertEqual<T: Equatable>(_ a: T, _ b: T) { precondition(a == b, "Equality check failed") }
+func XCTAssertEqual<T: Equatable>(_ a: T, _ b: T, file: StaticString = #file, line: UInt = #line) { precondition(a == b, "Equality check failed", file: file, line: line) }
 func XCTAssertNotEqual<T: Equatable>(_ a: T, _ b: T) { precondition(a != b, "Inequality check failed") }
 func XCTAssertThrowsError<T>(_ value: @autoclosure () throws -> T) {
     do { _ = try value(); preconditionFailure("Expected failure") } catch {}
@@ -163,6 +163,7 @@ final class ProgressLog: @unchecked Sendable {
         try await testBatchedReadingAndInterruption()
         try testJSONStreams()
         testRelatedURLsPreventDuplicateCreation()
-        print("11 test groups passed (including related URL and username matching)")
+        try await CleanupChecks.run()
+        print("Existing 11 test groups and Security Cleanup checks passed")
     }
 }
